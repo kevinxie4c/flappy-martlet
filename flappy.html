@@ -10,7 +10,7 @@
 	</div>
 	<script type="text/javascript">
 const app = new PIXI.Application({width: 640, height: 480, antialias: false});
-app.renderer.backgroundColor = 0xccffff;
+app.renderer.backgroundColor = 0x4db8ff;
 const canvas = document.getElementById('canvas').appendChild(app.view);
 PIXI.Loader.shared.add([
     'img/Burnside.png',
@@ -19,13 +19,24 @@ PIXI.Loader.shared.add([
     'img/ground.png',
     'img/martlet.png',
     'img/msg_start.png',
+    'img/msg_help.png',
+    'img/msg_gameover.png',
+    'img/cloud1.png',
+    'img/cloud2.png',
+    'img/cloud3.png',
+    'img/cloud4.png',
+    'img/cloud5.png',
 ]).load(setup);
+
+var au_flap = new Audio('audio/flap.mp3');
+var au_hit = new Audio('audio/hit.mp3');
+var au_bgm = new Audio('audio/crazy_frog.mp3');
 
 const canvasHeight = 480, canvasWidth = 640;
 const burnsideHeight = 18, burnsideWidth = 61;
 var ground, martlet;
 const init_x = 40, init_y = canvasHeight / 2;
-var msg_start;
+var msg_start, msg_help, msg_gameover;
 var msg_start_scale = 1.0;
 const msg_start_scale_max = 1.1;
 const dscale = 0.3 / 60;
@@ -34,10 +45,37 @@ var state;
 var mouse_down = false;
 var vy = 0;
 const g = 20 / 60, radius = 12, vy0 = -5, vx = 10;
+const gap_x = 200, gap_y = 100;
+var buildings = [];
+var burnsideTexture;
+var cloudTextures;
+const cloud_gap_min = 50; cloud_gap_max = 200;
+const cloud_y_min = 20; cloud_y_max = 400;
+const cloud_speed = 30 / 60;
+var clouds = [];
+var score = 0, best = 0;
+var scoreText;
 
 function setup() {
     const groudTexture = PIXI.Loader.shared.resources['img/ground.png'].texture;
-    const burnsideTexture = PIXI.Loader.shared.resources['img/Burnside.png'].texture;
+    burnsideTexture = PIXI.Loader.shared.resources['img/Burnside.png'].texture;
+    cloudTextures = [
+	PIXI.Loader.shared.resources['img/cloud1.png'].texture,
+	PIXI.Loader.shared.resources['img/cloud2.png'].texture,
+	PIXI.Loader.shared.resources['img/cloud3.png'].texture,
+	PIXI.Loader.shared.resources['img/cloud4.png'].texture,
+	PIXI.Loader.shared.resources['img/cloud5.png'].texture,
+    ];
+
+    var x = Math.random() * cloud_gap_max;
+    for (var i = 0; i < 12; ++i) {
+	var cloud = new PIXI.Sprite(cloudTextures[Math.floor(Math.random() * cloudTextures.length)]);
+	cloud.position.set(x, cloud_y_min + Math.random() * (cloud_y_max - cloud_y_min));
+	cloud.zIndex = 0;
+	clouds.push(cloud);
+	app.stage.addChild(cloud);
+	x += cloud_gap_min + Math.random() * (cloud_gap_max - cloud_gap_min);
+    }
 
     ground = new PIXI.extras.TilingSprite(groudTexture, canvasWidth * 2, groudTexture.height);
     ground.x = 0;
@@ -55,25 +93,51 @@ function setup() {
     martlet.anchor.set(0.5, 0.5);
     martlet.visible = false;
 
-    //const burnside = new PIXI.extras.TilingSprite(burnsideTexture, burnsideTexture.width, burnsideTexture.height * 2);
-
     msg_start = new PIXI.Sprite(PIXI.Loader.shared.resources['img/msg_start.png'].texture);
     msg_start.anchor.set(0.5, 0.5);
-    msg_start.position.set(canvasWidth / 2, canvasHeight / 2);
+    msg_start.position.set(canvasWidth / 2, canvasHeight / 2 - 70);
     msg_start.scale.set(msg_start_scale, msg_start_scale);
     msg_start.zIndex = 10;
+
+    msg_help = new PIXI.Sprite(PIXI.Loader.shared.resources['img/msg_help.png'].texture);
+    msg_help.anchor.set(0.5, 0.5);
+    msg_help.position.set(canvasWidth / 2, canvasHeight / 2);
+    msg_help.scale.set(msg_start_scale, msg_start_scale);
+    msg_help.zIndex = 10;
+
+    msg_gameover = new PIXI.Sprite(PIXI.Loader.shared.resources['img/msg_gameover.png'].texture);
+    msg_gameover.anchor.set(0.5, 0.5);
+    msg_gameover.position.set(canvasWidth / 2, canvasHeight / 2);
+    msg_gameover.scale.set(msg_start_scale, msg_start_scale);
+    msg_gameover.zIndex = 10;
+    msg_gameover.visible = false;
 
     mount.zIndex = 1;
     city.zIndex = 2;
     ground.zIndex = 3;
-    //burnside.zIndex = 3;
+    martlet.zIndex = 4;
 
+    app.stage.sortableChildren = true;
     app.stage.addChild(ground);
     app.stage.addChild(mount);
     app.stage.addChild(city);
-    //app.stage.addChild(burnside);
     app.stage.addChild(msg_start);
+    app.stage.addChild(msg_help);
+    app.stage.addChild(msg_gameover);
     app.stage.addChild(martlet);
+
+    const style = new PIXI.TextStyle({
+	fontFamily: "Impact",
+	fontSize: 20,
+	fill: "white",
+	stroke: "white",
+	strokeThickness: 0,
+	//fontWeight: "bolder",
+    });
+    scoreText = new PIXI.Text("SCORE: " + score + "    BEST: " + best, style);
+    scoreText.position.set(10, canvasHeight - 30);
+    scoreText.zIndex = 10;
+    app.stage.addChild(scoreText);
 
     canvas.addEventListener('mousedown', function () {
 	mouse_down = true;
@@ -83,32 +147,104 @@ function setup() {
     app.ticker.add(loop);
 }
 
+function create_buildings() {
+    for (var i = 0; i < canvasWidth / gap_x + 1; ++i) {
+	var h_hi, h_lo;
+	[h_hi, h_lo] = randh()
+	var burnside_hi = new PIXI.extras.TilingSprite(burnsideTexture, burnsideTexture.width, h_hi);
+	var burnside_lo = new PIXI.extras.TilingSprite(burnsideTexture, burnsideTexture.width, h_lo);
+	burnside_hi.position.set(canvasWidth + i * gap_x, 0);
+	burnside_lo.position.set(canvasWidth + i * gap_x, canvasHeight - ground.height - h_lo);
+	burnside_hi.zIndex = 3;
+	burnside_lo.zIndex = 3;
+	buildings.push(burnside_hi);
+	buildings.push(burnside_lo);
+	app.stage.addChild(burnside_hi);
+	app.stage.addChild(burnside_lo);
+    }
+}
+
+function clear_buildings() {
+    while (buildings.length > 0) {
+	var b = buildings.shift();
+	app.stage.removeChild(b);
+    }
+}
+
+function randh() {
+    var h_hi = burnsideTexture.height + Math.round(Math.random() * (canvasHeight - ground.height - gap_y - burnsideTexture.height * 2) / burnsideTexture.height) * burnsideTexture.height;
+    var h_low = Math.round((canvasHeight - ground.height - gap_y - h_hi) / burnsideTexture.height) * burnsideTexture.height;
+    return [h_hi, h_low];
+}
+
 function loop() {
+    for (var i = 0; i < clouds.length; ++i) {
+	var c = clouds[i];
+	c.x -= cloud_speed;
+    }
+    while (clouds[0].x + clouds[0].width < 0) {
+	var c = clouds.shift();
+	app.stage.removeChild(c);
+	var x = clouds[clouds.length - 1].x;
+	x += cloud_gap_min + Math.random() * (cloud_gap_max - cloud_gap_min);
+	var cloud = new PIXI.Sprite(cloudTextures[Math.floor(Math.random() * cloudTextures.length)]);
+	cloud.position.set(x, cloud_y_min + Math.random() * (cloud_y_max - cloud_y_min));
+	cloud.zIndex = 0;
+	clouds.push(cloud);
+	app.stage.addChild(cloud);
+    }
     state()
 }
 
 function init() {
+    score = 0;
+    scoreText.text = "SCORE: " + score + "    BEST: " + best;
     martlet.position.set(init_x, init_y);
     martlet.rotation = 0;
     martlet.visible = true;
     vy = vy0;
+    clear_buildings();
+    create_buildings();
+    au_bgm.audio.currentTime = 0;
+    au_bgm.play();
 }
 
 function play() {
     if (mouse_down) {
 	vy = vy0;
+	au_flap.play();
 	mouse_down = false;
     }
     ground.x -= speed;
     if (ground.x <= -canvasWidth)
 	ground.x = 0;
+
+    for (var i = 0; i < buildings.length; ++i) {
+	var b = buildings[i];
+	b.x -= speed;
+	if (i % 2 == 0 && b.x < martlet.x && b.x + speed >= martlet.x) {
+	    ++score;
+	    if (score > best)
+		best = score;
+	    scoreText.text = "SCORE: " + score + "    BEST: " + best;
+	}
+	if (b.x + b.width < 0) {
+	    var j = i + buildings.length - 2;
+	    if (j >= buildings.length)
+		j -= buildings.length;
+	    b.x = buildings[j].x + gap_x;
+	}
+    }
+
     martlet.rotation = Math.atan(vy / vx)
     martlet.y += vy;
     vy += g;
 
     if (collide()) {
-	console.log('collide');
+	au_hit.play();
 	msg_start.visible = true;
+	msg_gameover.visible = true;
+	au_bgm.pause();
 	state = gameover;
     }
 }
@@ -116,6 +252,7 @@ function play() {
 function intro() {
     if (mouse_down) {
 	msg_start.visible = false;
+	msg_help.visible = false;
 	msg_start_scale = 1.0;
 	init();
 	state = play;
@@ -134,6 +271,7 @@ function intro() {
 function gameover() {
     if (mouse_down) {
 	msg_start.visible = false;
+	msg_gameover.visible = false;
 	msg_start_scale = 1.0;
 	init();
 	state = play;
@@ -150,9 +288,31 @@ function gameover() {
 }
 
 function collide() {
-    if (martlet.y - radius < 0 || martlet.y + radius > canvasHeight - ground.height)
+    if (martlet.y < 0 + radius || martlet.y > canvasHeight - ground.height - radius)
 	return true;
+    for (var i = 0; i < buildings.length; ++i) {
+	var b = buildings[i];
+	if (martlet.x > b.x - radius && martlet.x < b.x + b.width + radius && martlet.y > b.y - radius && martlet.y < b.y + b.height + radius)
+	    return true;
+    }
     return false;
+}
+
+function Audio(src, loop = false) {
+    this.audio = document.createElement("audio");
+    this.audio.src = src;
+    this.audio.loop = loop;
+    this.audio.setAttribute("preload", "auto");
+    this.audio.setAttribute("controls", "none");
+    this.audio.style.display = "none";
+    document.body.appendChild(this.audio);
+    this.play = function(){
+	this.audio.currentTime = 0;
+	this.audio.play();
+    }
+    this.pause = function(){
+	this.audio.pause();
+    }
 }
 	</script>
     </body>
