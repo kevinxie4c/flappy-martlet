@@ -1,0 +1,159 @@
+<!doctype html>
+<html>
+    <head>
+	<meta charset="utf-8">
+	<title>Flappy Martlet</title>
+	<script src="js/pixi.min.js"></script>
+    </head>
+    <body>
+	<div id="canvas" style="width: 640px; margin: auto">
+	</div>
+	<script type="text/javascript">
+const app = new PIXI.Application({width: 640, height: 480, antialias: false});
+app.renderer.backgroundColor = 0xccffff;
+const canvas = document.getElementById('canvas').appendChild(app.view);
+PIXI.Loader.shared.add([
+    'img/Burnside.png',
+    'img/Montreal.png',
+    'img/Mount-Royal.png',
+    'img/ground.png',
+    'img/martlet.png',
+    'img/msg_start.png',
+]).load(setup);
+
+const canvasHeight = 480, canvasWidth = 640;
+const burnsideHeight = 18, burnsideWidth = 61;
+var ground, martlet;
+const init_x = 40, init_y = canvasHeight / 2;
+var msg_start;
+var msg_start_scale = 1.0;
+const msg_start_scale_max = 1.1;
+const dscale = 0.3 / 60;
+var speed = 100 / 60;
+var state;
+var mouse_down = false;
+var vy = 0;
+const g = 20 / 60, radius = 12, vy0 = -5, vx = 10;
+
+function setup() {
+    const groudTexture = PIXI.Loader.shared.resources['img/ground.png'].texture;
+    const burnsideTexture = PIXI.Loader.shared.resources['img/Burnside.png'].texture;
+
+    ground = new PIXI.extras.TilingSprite(groudTexture, canvasWidth * 2, groudTexture.height);
+    ground.x = 0;
+    ground.y = canvasHeight - ground.height;
+
+    const mount = new PIXI.Sprite(PIXI.Loader.shared.resources['img/Mount-Royal.png'].texture);
+    mount.x = 0;
+    mount.y = ground.y - mount.height;
+
+    const city = new PIXI.Sprite(PIXI.Loader.shared.resources['img/Montreal.png'].texture);
+    city.x = 0;
+    city.y = ground.y - city.height;
+
+    martlet = new PIXI.Sprite(PIXI.Loader.shared.resources['img/martlet.png'].texture);
+    martlet.anchor.set(0.5, 0.5);
+    martlet.visible = false;
+
+    //const burnside = new PIXI.extras.TilingSprite(burnsideTexture, burnsideTexture.width, burnsideTexture.height * 2);
+
+    msg_start = new PIXI.Sprite(PIXI.Loader.shared.resources['img/msg_start.png'].texture);
+    msg_start.anchor.set(0.5, 0.5);
+    msg_start.position.set(canvasWidth / 2, canvasHeight / 2);
+    msg_start.scale.set(msg_start_scale, msg_start_scale);
+    msg_start.zIndex = 10;
+
+    mount.zIndex = 1;
+    city.zIndex = 2;
+    ground.zIndex = 3;
+    //burnside.zIndex = 3;
+
+    app.stage.addChild(ground);
+    app.stage.addChild(mount);
+    app.stage.addChild(city);
+    //app.stage.addChild(burnside);
+    app.stage.addChild(msg_start);
+    app.stage.addChild(martlet);
+
+    canvas.addEventListener('mousedown', function () {
+	mouse_down = true;
+    });
+
+    state = intro;
+    app.ticker.add(loop);
+}
+
+function loop() {
+    state()
+}
+
+function init() {
+    martlet.position.set(init_x, init_y);
+    martlet.rotation = 0;
+    martlet.visible = true;
+    vy = vy0;
+}
+
+function play() {
+    if (mouse_down) {
+	vy = vy0;
+	mouse_down = false;
+    }
+    ground.x -= speed;
+    if (ground.x <= -canvasWidth)
+	ground.x = 0;
+    martlet.rotation = Math.atan(vy / vx)
+    martlet.y += vy;
+    vy += g;
+
+    if (collide()) {
+	console.log('collide');
+	msg_start.visible = true;
+	state = gameover;
+    }
+}
+
+function intro() {
+    if (mouse_down) {
+	msg_start.visible = false;
+	msg_start_scale = 1.0;
+	init();
+	state = play;
+	mouse_down = false;
+	return;
+    }
+    if (msg_start_scale <= 1.0) {
+	d = dscale;
+    } else if (msg_start_scale >= msg_start_scale_max) {
+	d = -dscale;
+    }
+    msg_start_scale += d;
+    msg_start.scale.set(msg_start_scale, msg_start_scale);
+}
+
+function gameover() {
+    if (mouse_down) {
+	msg_start.visible = false;
+	msg_start_scale = 1.0;
+	init();
+	state = play;
+	mouse_down = false;
+	return;
+    }
+    if (msg_start_scale <= 1.0) {
+	d = dscale;
+    } else if (msg_start_scale >= msg_start_scale_max) {
+	d = -dscale;
+    }
+    msg_start_scale += d;
+    msg_start.scale.set(msg_start_scale, msg_start_scale);
+}
+
+function collide() {
+    if (martlet.y - radius < 0 || martlet.y + radius > canvasHeight - ground.height)
+	return true;
+    return false;
+}
+	</script>
+    </body>
+</html>
